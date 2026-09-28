@@ -1,4 +1,4 @@
-const UA = "AnyListProMax/1.0 (+https://github.com/zkSac/AnyListProMax)";
+const UA = "AnyListProMax/1.0";
 const TIMEOUT_MS = 10000;
 
 async function getJson(url, fetchImpl, retries = 1) {

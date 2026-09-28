@@ -8,7 +8,7 @@ async function downloadImage(url, fetchImpl = fetch) {
   let res;
   try {
     res = await fetchImpl(url, {
-      headers: { 'User-Agent': 'AnyListProMax/1.0 (+https://github.com/zkSac/AnyListProMax)', Accept: 'image/*' },
+      headers: { 'User-Agent': 'AnyListProMax/1.0', Accept: 'image/*' },
       signal: AbortSignal.timeout(15000),
     });
   } catch (error) {
