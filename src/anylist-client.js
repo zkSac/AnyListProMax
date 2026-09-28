@@ -4,6 +4,7 @@ import AnyList from '../anylist-js/lib/index.js';
 import { normalizeRecipe } from './recipe-normalizer.js';
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+const REFRESH_TTL_MS = 5000;
 
 async function downloadImage(url, fetchImpl = fetch) {
   let res;
@@ -53,6 +54,21 @@ class AnyListClient {
     this._username = username || null;
     this._password = password || null;
     this.defaultListName = defaultListName || null;
+    this._lastRefresh = 0;
+  }
+
+  // The server process is long-lived, so stores/items changed in the AnyList app would
+  // never show up. Re-read the account data at most once per REFRESH_TTL_MS.
+  async _refreshIfStale(force = false) {
+    if (!this.client || (!force && Date.now() - this._lastRefresh < REFRESH_TTL_MS)) return;
+    try {
+      await this.client.getLists();
+      this._lastRefresh = Date.now();
+      const fresh = this.targetList && this.client.getListByName(this.targetList.name);
+      if (fresh) this.targetList = fresh;
+    } catch (error) {
+      console.error(`Could not refresh AnyList data: ${error.message}`);
+    }
   }
 
   async connect(listName = null) {
@@ -79,6 +95,7 @@ class AnyListClient {
 
     // If already connected to the same list, skip reconnection
     if (this.client && this.targetList && this.targetList.name === targetListName) {
+      await this._refreshIfStale();
       return true;
     }
 
@@ -96,6 +113,9 @@ class AnyListClient {
         console.error('Successfully authenticated with AnyList');
 
         await this.client.getLists();
+        this._lastRefresh = Date.now();
+      } else {
+        await this._refreshIfStale();
       }
 
       // Find the target list
@@ -372,6 +392,24 @@ class AnyListClient {
       storeIds = [store.identifier];
     }
     await item.setStores(storeIds);
+  }
+
+  async renameItem(itemName, newName) {
+    if (!this.targetList) {
+      throw new Error('Not connected to any list. Call connect() first.');
+    }
+    const trimmed = String(newName || '').trim();
+    if (!trimmed) throw new Error('New name cannot be empty.');
+    const item = this.targetList.getItemByName(itemName);
+    if (!item) {
+      throw new Error(`Item "${itemName}" not found in list`);
+    }
+    const clash = this.targetList.getItemByName(trimmed);
+    if (clash && clash !== item) {
+      throw new Error(`An item named "${trimmed}" already exists in list`);
+    }
+    item.name = trimmed;
+    await item.save();
   }
 
   async setItemPricing(itemName, { price, storeName, priceDetails, packageSize, upc } = {}) {

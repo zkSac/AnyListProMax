@@ -115,6 +115,13 @@ export class MockAnyListClient {
     item.store = store || null;
   }
 
+  async renameItem(name, newName) {
+    const item = this._items.find(i => i.name === name);
+    if (!item) throw new Error(`Item "${name}" not found in list`);
+    if (this._items.some(i => i !== item && i.name === newName)) throw new Error(`An item named "${newName}" already exists in list`);
+    item.name = newName;
+  }
+
   async setItemPricing(name, opts) {
     const item = this._items.find(i => i.name === name);
     if (!item) throw new Error(`Item "${name}" not found in list`);

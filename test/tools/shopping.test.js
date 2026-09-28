@@ -421,4 +421,30 @@ describe('shopping tool', () => {
       assert.ok(result.content[0].text.includes('HTTP 500'));
     });
   });
+
+  describe('rename_item', () => {
+    beforeEach(async () => {
+      await handlers.shopping({ action: 'add_item', name: 'Barilla Spaghetti (Kroger)' });
+      await handlers.shopping({ action: 'add_item', name: 'Milk' });
+    });
+
+    it('renames an item', async () => {
+      const result = await handlers.shopping({
+        action: 'rename_item', name: 'Barilla Spaghetti (Kroger)', new_name: ' Barilla Spaghetti ' });
+      assert.ok(result.content[0].text.includes('Renamed "Barilla Spaghetti (Kroger)" to "Barilla Spaghetti"'));
+      assert.equal(client._items[0].name, 'Barilla Spaghetti');
+    });
+
+    it('requires new_name', async () => {
+      const result = await handlers.shopping({ action: 'rename_item', name: 'Milk' });
+      assert.equal(result.isError, true);
+      assert.ok(result.content[0].text.includes('requires "new_name"'));
+    });
+
+    it('refuses to clash with an existing item', async () => {
+      const result = await handlers.shopping({ action: 'rename_item', name: 'Milk', new_name: 'Barilla Spaghetti (Kroger)' });
+      assert.equal(result.isError, true);
+      assert.ok(result.content[0].text.includes('already exists'));
+    });
+  });
 });

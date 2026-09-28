@@ -23,7 +23,8 @@ function buildDescription(stores) {
 - get_favorites: Get favorite items for a list
 - get_recents: Get recently added items for a list
 - list_stores: list stores available for the list (if any)
-- set_item_store: Assign an item to a store (store_name)
+- set_item_store: Assign an item to a store (store_name); keep store names out of item titles
+- rename_item: Rename an item (name = current name, new_name = new name) keeping its photo, price and store
 - set_item_pricing: Set an item's price (price, optional price_details like "per lb", store_name), package size (package_size, e.g. "500 g") and/or UPC barcode (upc); price=null clears the price
 - search_item_photos: Find candidate photos for an item (photo_query, or upc for an exact product photo; limit per source, default 3). Returns image URLs with license/creator. IMPORTANT: write photo_query in English (brand + product + size, e.g. \"kroger long grain white rice 5 lb\"); product databases are English, so Spanish terms give no or wrong results
 - set_item_photo: Attach a photo to an item: photo_url (public https URL, or absolute local file path in stdio mode), or photo_query to auto-pick the best match (upc gives an exact product photo); photo_url=null removes it`;
@@ -81,7 +82,7 @@ export function register(server, getClient, { searchPhotos = defaultSearchPhotos
     description: buildDescription([]),
     inputSchema: {
       action: z.enum(["list_lists", "list_items", "add_item", "add_items",
-        "set_item_store", "set_item_pricing", "set_item_photo", "search_item_photos", "check_item", "uncheck_item", "delete_item", "get_favorites", "get_recents", "list_stores"]).describe("The shopping action to perform"),
+        "set_item_store", "rename_item", "set_item_pricing", "set_item_photo", "search_item_photos", "check_item", "uncheck_item", "delete_item", "get_favorites", "get_recents", "list_stores"]).describe("The shopping action to perform"),
       list_name: z.string().optional().describe("Name of the list (defaults to configured default list)"),
       name: z.string().optional().describe("Item name (required for add_item, set_item_store, check_item, uncheck_item, delete_item)"),
       items: z.array(z.union([
@@ -103,6 +104,7 @@ export function register(server, getClient, { searchPhotos = defaultSearchPhotos
       price: z.number().min(0).nullable().optional().describe("Unit price (set_item_pricing only; null clears prices)"),
       price_details: z.string().optional().describe("Price note, e.g. \"per lb\" (set_item_pricing only)"),
       package_size: z.string().nullable().optional().describe("Package size, e.g. \"500 g\" or \"12 oz\" (set_item_pricing only; null clears)"),
+      new_name: z.string().min(1).optional().describe("New item name (rename_item only)"),
       photo_query: z.string().optional().describe("Search text to auto-pick a photo (set_item_photo) or to search (search_item_photos); defaults to the item name. Use ENGLISH (brand + product + size); common Spanish grocery words are translated as a fallback"),
       limit: z.number().int().min(1).max(10).optional().describe("Max results per source (search_item_photos only, default 3)"),
       photo_url: z.string().nullable().optional().describe("Image to attach as the item's photo: a public https URL or an absolute local file path (set_item_photo only; null removes the photo)"),
@@ -208,6 +210,16 @@ export function register(server, getClient, { searchPhotos = defaultSearchPhotos
           added.forEach(n => summary.push(`  ✓ ${n}`));
           failed.forEach(f => summary.push(`  ✗ ${f}`));
           return failed.length > 0 ? errorResponse(summary.join("\n")) : textResponse(summary.join("\n"));
+        }
+        case "rename_item": {
+          let itemName = name;
+          if (!itemName) itemName = await elicitRequiredField("name", "Which item do you want to rename?");
+          if (!params.new_name) throw new Error(`Action "rename_item" requires "new_name"`);
+          await client.connect(list_name);
+          const resolvedRename = await resolveItemName(client, itemName);
+          const newName = params.new_name.trim();
+          await client.renameItem(resolvedRename, newName);
+          return textResponse(`Renamed "${resolvedRename}" to "${newName}" on list "${client.targetList.name}"`);
         }
         case "set_item_pricing": {
           let itemName = name;

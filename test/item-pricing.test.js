@@ -183,3 +183,56 @@ describe('Keychain credentials', () => {
     assert.deepEqual(readKeychainCredentials('svc', exec, 'darwin'), { username: undefined, password: undefined });
   });
 });
+
+describe('AnyListClient refresh and rename', () => {
+  function fakeSetup() {
+    let stores = [];
+    const calls = { getLists: 0 };
+    const mkList = () => ({ name: 'L', stores: [...stores], getItemByName: () => null });
+    const lists = { current: mkList() };
+    const c = new AnyListClient({ username: 'u', password: 'p', defaultListName: 'L' });
+    c.client = {
+      getLists: async () => { calls.getLists++; lists.current = mkList(); },
+      getListByName: () => lists.current,
+    };
+    c.targetList = lists.current;
+    return { c, calls, setStores: s => { stores = s; } };
+  }
+
+  it('re-reads account data after the TTL so stores added in the app appear', async () => {
+    const { c, calls, setStores } = fakeSetup();
+    c._lastRefresh = Date.now() - 60000;
+    setStores([{ name: 'Kroger' }]);
+    await c.connect('L');
+    assert.equal(calls.getLists, 1);
+    assert.deepEqual(c.getStores().map(s => s.name), ['Kroger']);
+  });
+
+  it('does not re-read within the TTL', async () => {
+    const { c, calls } = fakeSetup();
+    c._lastRefresh = Date.now();
+    await c.connect('L');
+    await c.connect('L');
+    assert.equal(calls.getLists, 0);
+  });
+
+  it('keeps working if the refresh fails', async () => {
+    const { c } = fakeSetup();
+    c._lastRefresh = 0;
+    c.client.getLists = async () => { throw new Error('offline'); };
+    assert.equal(await c.connect('L'), true);
+  });
+
+  it('renameItem validates and saves', async () => {
+    const saved = [];
+    const item = { name: 'A', save: async () => saved.push(item.name) };
+    const other = { name: 'B' };
+    const c = new AnyListClient();
+    c.targetList = { getItemByName: n => ({ A: item, B: other })[n] || null };
+    await c.renameItem('A', '  C ');
+    assert.deepEqual(saved, ['C']);
+    await assert.rejects(() => c.renameItem('A', 'B'), /already exists/);
+    await assert.rejects(() => c.renameItem('A', '  '), /cannot be empty/);
+    await assert.rejects(() => c.renameItem('Nope', 'X'), /not found/);
+  });
+});
