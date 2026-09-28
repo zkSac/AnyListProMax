@@ -71,6 +71,13 @@ Manage shopping lists and items.
 // path in stdio mode (jpg/png/gif/webp/bmp/tiff, max 10 MB). photo_url=null removes it.
 { "name": "shopping", "arguments": { "action": "set_item_photo", "name": "Tomatoes", "photo_url": "https://example.com/tomato.jpg" } }
 
+// Find photo candidates (Openverse CC-licensed stock photos + Open Food Facts product photos).
+// Use "upc" for the exact product photo. Results include license and creator.
+{ "name": "shopping", "arguments": { "action": "search_item_photos", "photo_query": "tomatoes", "limit": 3 } }
+
+// Auto-pick the best match instead of choosing (upc → exact product photo, otherwise stock photo)
+{ "name": "shopping", "arguments": { "action": "set_item_photo", "name": "Tomatoes", "photo_query": "red tomatoes" } }
+
 // Set category for an item
 ```
 

@@ -6,11 +6,23 @@ import { MockAnyListClient, createMockServer } from './helpers.js';
 describe('shopping tool', () => {
   let client;
   let handlers;
+  let searchCalls;
+  let searchResult;
 
   beforeEach(() => {
+    searchResult = { results: [
+      { url: 'https://img/1.jpg', title: 'Tomato', source: 'flickr', license: 'CC BY 2.0', creator: 'ann' },
+      { url: 'https://img/2.jpg', title: 'Tomatoes', source: 'openfoodfacts', license: 'CC-BY-SA', creator: 'OFF' },
+    ], errors: [] };
     client = new MockAnyListClient();
     const { server, handlers: h } = createMockServer();
-    register(server, () => Promise.resolve(client));
+    searchCalls = [];
+    register(server, () => Promise.resolve(client), {
+      searchPhotos: async (args) => {
+        searchCalls.push(args);
+        return searchResult;
+      },
+    });
     handlers = h;
   });
 
@@ -359,6 +371,54 @@ describe('shopping tool', () => {
     it('errors when photo_url is missing', async () => {
       const result = await handlers.shopping({ action: 'set_item_photo', name: 'Tomatoes' });
       assert.equal(result.isError, true);
+    });
+
+    it('auto-picks the first search result with photo_query', async () => {
+      const result = await handlers.shopping({ action: 'set_item_photo', name: 'Tomatoes', photo_query: 'red tomato' });
+      assert.equal(client._items[0].photo, 'https://img/1.jpg');
+      assert.ok(result.content[0].text.includes('CC BY 2.0'));
+      assert.deepEqual(searchCalls[0], { query: 'red tomato', upc: undefined, limit: 1 });
+    });
+
+    it('auto-picks using the item name when only upc is missing', async () => {
+      await handlers.shopping({ action: 'set_item_photo', name: 'Tomatoes', upc: '0123' });
+      assert.deepEqual(searchCalls[0], { query: undefined, upc: '0123', limit: 1 });
+    });
+
+    it('errors when nothing is found', async () => {
+      searchResult = { results: [], errors: ['openverse: HTTP 500'] };
+      const result = await handlers.shopping({ action: 'set_item_photo', name: 'Tomatoes', photo_query: 'zzz' });
+      assert.equal(result.isError, true);
+      assert.ok(result.content[0].text.includes('No photo found'));
+      assert.equal(client._items[0].photo, undefined);
+    });
+  });
+
+  describe('search_item_photos', () => {
+    it('lists candidates with license and creator', async () => {
+      const result = await handlers.shopping({ action: 'search_item_photos', photo_query: 'tomato', limit: 2 });
+      const text = result.content[0].text;
+      assert.ok(text.includes('2 candidate photos'));
+      assert.ok(text.includes('https://img/2.jpg'));
+      assert.ok(text.includes('CC-BY-SA'));
+      assert.equal(searchCalls[0].limit, 2);
+    });
+
+    it('falls back to the item name as query', async () => {
+      await handlers.shopping({ action: 'search_item_photos', name: 'Tomatoes' });
+      assert.equal(searchCalls[0].query, 'Tomatoes');
+    });
+
+    it('errors without query, name or upc', async () => {
+      const result = await handlers.shopping({ action: 'search_item_photos' });
+      assert.equal(result.isError, true);
+    });
+
+    it('reports empty results and source errors', async () => {
+      searchResult = { results: [], errors: ['openverse: HTTP 500'] };
+      const result = await handlers.shopping({ action: 'search_item_photos', photo_query: 'x' });
+      assert.ok(result.content[0].text.includes('No photos found'));
+      assert.ok(result.content[0].text.includes('HTTP 500'));
     });
   });
 });

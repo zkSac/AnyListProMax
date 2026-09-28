@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { textResponse, errorResponse } from "./helpers.js";
 import { createElicitationHelpers } from "./elicitation.js";
+import { searchPhotos as defaultSearchPhotos } from "../photo-search.js";
 
 // Default categories recognized by anylist.
 const valid_categories = ["baby","bakery","beverages","breakfast-and-cereal","condiments-oils-and-salad-dressings",
@@ -24,7 +25,8 @@ function buildDescription(stores) {
 - list_stores: list stores available for the list (if any)
 - set_item_store: Assign an item to a store (store_name)
 - set_item_pricing: Set an item's price (price, optional price_details like "per lb", store_name), package size (package_size, e.g. "500 g") and/or UPC barcode (upc); price=null clears the price
-- set_item_photo: Attach a photo to an item (photo_url: public https URL, or absolute local file path in stdio mode); photo_url=null removes it`;
+- search_item_photos: Find candidate photos for an item (query, or upc for an exact product photo; limit per source, default 3). Returns image URLs with license/creator
+- set_item_photo: Attach a photo to an item: photo_url (public https URL, or absolute local file path in stdio mode), or photo_query to auto-pick the best match (upc gives an exact product photo); photo_url=null removes it`;
   if (!stores || stores.length === 0) return base;
   const storeList = stores.map(s => s.name).join(', ');
   return `${base}\n\nAvailable stores: ${storeList}`;
@@ -41,7 +43,7 @@ async function validateStoreName(client, storeName) {
   return { valid: true, message: null };
 }
 
-export function register(server, getClient) {
+export function register(server, getClient, { searchPhotos = defaultSearchPhotos } = {}) {
   const { elicitListName, elicitItemChoice, elicitRequiredField } = createElicitationHelpers(server);
 
   function findPartialMatches(client, itemName, wantChecked = false) {
@@ -79,7 +81,7 @@ export function register(server, getClient) {
     description: buildDescription([]),
     inputSchema: {
       action: z.enum(["list_lists", "list_items", "add_item", "add_items",
-        "set_item_store", "set_item_pricing", "set_item_photo", "check_item", "uncheck_item", "delete_item", "get_favorites", "get_recents", "list_stores"]).describe("The shopping action to perform"),
+        "set_item_store", "set_item_pricing", "set_item_photo", "search_item_photos", "check_item", "uncheck_item", "delete_item", "get_favorites", "get_recents", "list_stores"]).describe("The shopping action to perform"),
       list_name: z.string().optional().describe("Name of the list (defaults to configured default list)"),
       name: z.string().optional().describe("Item name (required for add_item, set_item_store, check_item, uncheck_item, delete_item)"),
       items: z.array(z.union([
@@ -101,8 +103,10 @@ export function register(server, getClient) {
       price: z.number().min(0).nullable().optional().describe("Unit price (set_item_pricing only; null clears prices)"),
       price_details: z.string().optional().describe("Price note, e.g. \"per lb\" (set_item_pricing only)"),
       package_size: z.string().nullable().optional().describe("Package size, e.g. \"500 g\" or \"12 oz\" (set_item_pricing only; null clears)"),
+      photo_query: z.string().optional().describe("Search text to auto-pick a photo (set_item_photo) or to search (search_item_photos); defaults to the item name"),
+      limit: z.number().int().min(1).max(10).optional().describe("Max results per source (search_item_photos only, default 3)"),
       photo_url: z.string().nullable().optional().describe("Image to attach as the item's photo: a public https URL or an absolute local file path (set_item_photo only; null removes the photo)"),
-      upc: z.string().nullable().optional().describe("Product barcode/UPC (set_item_pricing only; null clears)"),
+      upc: z.string().nullable().optional().describe("Product barcode/UPC (set_item_pricing: stored on the item, null clears; search_item_photos/set_item_photo: exact product photo lookup)"),
     }
   }, async (params) => {
     const { action, list_name, name, quantity, notes, include_checked, include_notes, category } = params;
@@ -227,16 +231,41 @@ export function register(server, getClient) {
           });
           return textResponse(`Updated pricing for "${resolvedPrice}" on list "${client.targetList.name}"`);
         }
+        case "search_item_photos": {
+          const query = params.photo_query || name;
+          if (!query && !params.upc) throw new Error(`Action "search_item_photos" requires "photo_query", "name" or "upc"`);
+          const { results, errors } = await searchPhotos({ query, upc: params.upc, limit: params.limit });
+          if (results.length === 0) {
+            return textResponse(`No photos found for "${query || params.upc}".${errors.length ? "\nErrors: " + errors.join("; ") : ""}`);
+          }
+          const lines = results.map((r, i) =>
+            `${i + 1}. ${r.title} [${r.source}, ${r.license}, by ${r.creator}]\n   ${r.url}`);
+          const tail = errors.length ? `\n(Some sources failed: ${errors.join("; ")})` : "";
+          return textResponse(`${results.length} candidate photos. Use set_item_photo with the chosen photo_url:\n${lines.join("\n")}${tail}`);
+        }
         case "set_item_photo": {
           let itemName = name;
           if (!itemName) itemName = await elicitRequiredField("name", "Which item do you want to add a photo to?");
-          if (params.photo_url === undefined) throw new Error(`Action "set_item_photo" requires "photo_url" (use null to remove)`);
+          if (params.photo_url === undefined && !params.photo_query && !params.upc) {
+            throw new Error(`Action "set_item_photo" requires "photo_url" (null removes), "photo_query" or "upc"`);
+          }
           await client.connect(list_name);
           const resolvedPhoto = await resolveItemName(client, itemName);
-          await client.setItemPhoto(resolvedPhoto, params.photo_url);
-          return textResponse(params.photo_url
-            ? `Set photo for "${resolvedPhoto}" on list "${client.targetList.name}"`
-            : `Removed photo from "${resolvedPhoto}" on list "${client.targetList.name}"`);
+          let photo = params.photo_url;
+          let picked = null;
+          if (photo === undefined) {
+            const { results, errors } = await searchPhotos({
+              query: params.photo_query || (params.upc ? undefined : resolvedPhoto), upc: params.upc, limit: 1 });
+            if (results.length === 0) {
+              throw new Error(`No photo found${errors.length ? " (" + errors.join("; ") + ")" : ""}`);
+            }
+            picked = results[0];
+            photo = picked.url;
+          }
+          await client.setItemPhoto(resolvedPhoto, photo);
+          if (!photo) return textResponse(`Removed photo from "${resolvedPhoto}" on list "${client.targetList.name}"`);
+          return textResponse(`Set photo for "${resolvedPhoto}" on list "${client.targetList.name}"` +
+            (picked ? ` (${picked.title}, ${picked.license}, by ${picked.creator})` : ""));
         }
         case "check_item": {
           let itemName = name;

@@ -2,6 +2,28 @@ import { readFile } from 'node:fs/promises';
 import AnyList from '../anylist-js/lib/index.js';
 import { normalizeRecipe } from './recipe-normalizer.js';
 
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+
+async function downloadImage(url, fetchImpl = fetch) {
+  let res;
+  try {
+    res = await fetchImpl(url, {
+      headers: { 'User-Agent': 'AnyListProMax/1.0 (+https://github.com/zkSac/AnyListProMax)', Accept: 'image/*' },
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (error) {
+    throw new Error(`Could not download image: ${error.message}`);
+  }
+  if (!res.ok) throw new Error(`Could not download image: HTTP ${res.status}`);
+  const declared = Number(res.headers.get('content-length'));
+  if (declared > MAX_PHOTO_BYTES) throw new Error('Photo is larger than 10 MB.');
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > MAX_PHOTO_BYTES) throw new Error('Photo is larger than 10 MB.');
+  return buf;
+}
+
+export { downloadImage };
+
 class AnyListClient {
   /**
    * @param {{ username?: string, password?: string, defaultListName?: string }} [credentials]
@@ -370,6 +392,9 @@ class AnyListClient {
         throw new Error('Local file paths are not allowed here; provide a public http(s) image URL.');
       }
       photo = await readFile(photo.replace(/^file:\/\//, ''));
+    } else if (photo && this.allowLocalFiles) {
+      // AnyList answers 200 even when it can't fetch a URL, so download and validate it here.
+      photo = await downloadImage(photo);
     }
     return item.setPhoto(photo);
   }

@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import AnyListClient from '../src/anylist-client.js';
+import AnyListClient, { downloadImage } from '../src/anylist-client.js';
 
 const require = createRequire(import.meta.url);
 const ProtoBuf = require('protobufjs');
@@ -124,5 +124,46 @@ describe('AnyListClient local photo files', () => {
     c.targetList = { getItemByName: () => ({ setPhoto: async () => 'id' }) };
     await assert.rejects(() => c.setItemPhoto('x', '/etc/passwd'), /not allowed/);
     assert.equal(await c.setItemPhoto('x', 'https://example.com/a.jpg'), 'id');
+  });
+});
+
+describe('AnyListClient photo URL handling', () => {
+  const res = (body, { ok = true, status = 200, headers = {} } = {}) => ({
+    ok, status, headers: { get: k => headers[k.toLowerCase()] ?? null }, arrayBuffer: async () => body,
+  });
+
+  it('downloads URLs locally (stdio mode) and passes the bytes on', async () => {
+    const orig = globalThis.fetch;
+    globalThis.fetch = async () => res(JPEG.buffer.slice(JPEG.byteOffset, JPEG.byteOffset + JPEG.length));
+    try {
+      let received;
+      const c = new AnyListClient();
+      c.targetList = { getItemByName: () => ({ setPhoto: async p => { received = p; return 'id'; } }) };
+      await c.setItemPhoto('x', 'https://example.com/a.jpg');
+      assert.ok(Buffer.isBuffer(received));
+      assert.equal(received.length, JPEG.length);
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
+
+  it('HTTP mode hands the URL to AnyList without fetching it', async () => {
+    const orig = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error('must not fetch'); };
+    try {
+      let received;
+      const c = new AnyListClient({ allowLocalFiles: false });
+      c.targetList = { getItemByName: () => ({ setPhoto: async p => { received = p; return 'id'; } }) };
+      await c.setItemPhoto('x', 'https://example.com/a.jpg');
+      assert.equal(received, 'https://example.com/a.jpg');
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
+
+  it('downloadImage reports HTTP errors, network errors and oversize files', async () => {
+    await assert.rejects(() => downloadImage('u', async () => res(new ArrayBuffer(0), { ok: false, status: 404 })), /HTTP 404/);
+    await assert.rejects(() => downloadImage('u', async () => { throw new Error('ENOTFOUND'); }), /ENOTFOUND/);
+    await assert.rejects(() => downloadImage('u', async () => res(new ArrayBuffer(0), { headers: { 'content-length': String(11 * 1024 * 1024) } })), /10 MB/);
   });
 });
