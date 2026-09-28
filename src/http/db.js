@@ -214,14 +214,6 @@ export function registerOAuthClient({ clientId, redirectUri }) {
   return getOAuthClient(clientId);
 }
 
-export function createConfidentialClient({ clientId, clientSecretHash, userId, clientName }) {
-  getDb().prepare(`
-    INSERT INTO oauth_clients (client_id, client_secret_hash, user_id, client_name)
-    VALUES (?, ?, ?, ?)
-  `).run(clientId, clientSecretHash, userId, clientName || null);
-  return getDb().prepare("SELECT * FROM oauth_clients WHERE client_id = ?").get(clientId);
-}
-
 export function getOAuthClientWithSecret(clientId) {
   return getDb().prepare("SELECT * FROM oauth_clients WHERE client_id = ?").get(clientId);
 }

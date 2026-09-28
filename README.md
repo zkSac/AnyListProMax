@@ -1,3 +1,9 @@
+# AnyListProMax
+
+Fork of [bobby060/anylist-mcp](https://github.com/bobby060/anylist-mcp) that adds what AnyList's own API supports but other MCP servers skip: **item prices, package sizes, UPC barcodes and photos**. Set them with `set_item_pricing` and `set_item_photo` (see [docs/tools.md](docs/tools.md)); `list_items` shows prices and package sizes.
+
+Everything below is the upstream documentation.
+
 # Unofficial AnyList MCP Server
 
 An MCP server that integrates with [AnyList](https://www.anylist.com/) — shopping lists, recipes, and meal planning — exposed via the Model Context Protocol. Works with Claude Desktop, Claude Code, Claude Web/Mobile, or any MCP-compatible client like Home Assistant.
