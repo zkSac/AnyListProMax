@@ -14,6 +14,43 @@ async function getJson(url, fetchImpl, retries = 1) {
   return res.json();
 }
 
+
+// Spanish -> English for common grocery words. Product databases (Open Food Facts US
+// brands, Flickr tags) are mostly English, so Spanish queries return nothing or noise.
+const ES_EN = {
+  arroz: "rice", frijol: "beans", frijoles: "beans", habichuelas: "beans", lenteja: "lentils", lentejas: "lentils",
+  garbanzo: "chickpeas", garbanzos: "chickpeas", pasta: "pasta", espagueti: "spaghetti", espaguetis: "spaghetti",
+  fideos: "noodles", harina: "flour", azucar: "sugar", sal: "salt", pimienta: "pepper", aceite: "oil",
+  vinagre: "vinegar", salsa: "sauce", mayonesa: "mayonnaise", mostaza: "mustard", catsup: "ketchup",
+  cereal: "cereal", avena: "oats", pan: "bread", tortilla: "tortilla", tortillas: "tortillas", galleta: "cookies",
+  galletas: "cookies", queso: "cheese", leche: "milk", mantequilla: "butter", crema: "cream", yogur: "yogurt",
+  huevo: "eggs", huevos: "eggs", pollo: "chicken", carne: "beef", res: "beef", cerdo: "pork",
+  jamon: "ham", tocino: "bacon", salchicha: "sausage", salchichas: "sausage", pavo: "turkey", pescado: "fish",
+  atun: "tuna", camaron: "shrimp", camarones: "shrimp", tomate: "tomato", tomates: "tomatoes",
+  cebolla: "onion", cebollas: "onions", ajo: "garlic", papa: "potato", papas: "potatoes", zanahoria: "carrot",
+  zanahorias: "carrots", lechuga: "lettuce", espinaca: "spinach", espinacas: "spinach", brocoli: "broccoli",
+  pepino: "cucumber", aguacate: "avocado", aguacates: "avocados", limon: "lemon", limones: "lemons",
+  naranja: "orange", naranjas: "oranges", manzana: "apple", manzanas: "apples", platano: "banana",
+  platanos: "bananas", fresa: "strawberry", fresas: "strawberries", uva: "grapes", uvas: "grapes",
+  sandia: "watermelon", pina: "pineapple", pimiento: "bell pepper", chile: "chili pepper", maiz: "corn",
+  elote: "corn", hongos: "mushrooms", champinones: "mushrooms", jugo: "juice", agua: "water",
+  refresco: "soda", cafe: "coffee", cerveza: "beer", vino: "wine", papel: "paper", higienico: "toilet",
+  servilletas: "napkins", jabon: "soap", champu: "shampoo", detergente: "detergent", panales: "diapers",
+  congelado: "frozen", congelados: "frozen", rallado: "shredded", rebanado: "sliced", integral: "whole grain",
+  blanco: "white", negro: "black", onzas: "oz", onza: "oz", libras: "lb", libra: "lb", gramos: "g",
+  litros: "l", litro: "l", de: "", del: "", la: "", el: "",
+};
+
+const stripAccents = w => w.normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+/** Translate known Spanish grocery words to English; unknown words (brands, English) pass through. */
+export function translateQuery(query) {
+  return String(query || "").split(/\s+/).filter(Boolean).map(w => {
+    const key = stripAccents(w.toLowerCase());
+    return Object.hasOwn(ES_EN, key) ? ES_EN[key] : w;
+  }).filter(Boolean).join(" ").trim();
+}
+
 const SIZE_RE = /(\d+(?:[.,]\d+)?)\s*(fl\.?\s*oz|oz|lbs?|kg|g|ml|l|ct)\b\.?/i;
 const normSize = (n, u) => `${n.replace(",", ".")}${u.toLowerCase().replace(/[\s.]/g, "").replace("lbs", "lb")}`;
 
@@ -91,7 +128,8 @@ export async function searchPhotos({ query, upc, limit = 3, fetchImpl = fetch } 
   const n = Math.min(Math.max(Number(limit) || 3, 1), 10);
   const jobs = [];
   if (upc) jobs.push(["openfoodfacts (upc)", searchProductByUpc(upc, fetchImpl)]);
-  const { terms, size } = splitSize(query || "");
+  const usedQuery = translateQuery(query || "");
+  const { terms, size } = splitSize(usedQuery);
   if (terms) {
     jobs.push(["openverse", searchStock(terms, n, fetchImpl)]);
     jobs.push(["openfoodfacts", searchProducts(terms, size ? n * 3 : n, fetchImpl)]);
@@ -113,5 +151,7 @@ export async function searchPhotos({ query, upc, limit = 3, fetchImpl = fetch } 
     // stable sort: candidates whose title mentions the requested size go first
     results.sort((a, b) => (titleSize(b.title) === size) - (titleSize(a.title) === size));
   }
-  return { results, errors };
+  const out = { results, errors };
+  if (usedQuery && usedQuery !== (query || "").trim()) out.usedQuery = usedQuery;
+  return out;
 }

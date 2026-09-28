@@ -25,7 +25,7 @@ function buildDescription(stores) {
 - list_stores: list stores available for the list (if any)
 - set_item_store: Assign an item to a store (store_name)
 - set_item_pricing: Set an item's price (price, optional price_details like "per lb", store_name), package size (package_size, e.g. "500 g") and/or UPC barcode (upc); price=null clears the price
-- search_item_photos: Find candidate photos for an item (query, or upc for an exact product photo; limit per source, default 3). Returns image URLs with license/creator
+- search_item_photos: Find candidate photos for an item (photo_query, or upc for an exact product photo; limit per source, default 3). Returns image URLs with license/creator. IMPORTANT: write photo_query in English (brand + product + size, e.g. \"kroger long grain white rice 5 lb\"); product databases are English, so Spanish terms give no or wrong results
 - set_item_photo: Attach a photo to an item: photo_url (public https URL, or absolute local file path in stdio mode), or photo_query to auto-pick the best match (upc gives an exact product photo); photo_url=null removes it`;
   if (!stores || stores.length === 0) return base;
   const storeList = stores.map(s => s.name).join(', ');
@@ -103,7 +103,7 @@ export function register(server, getClient, { searchPhotos = defaultSearchPhotos
       price: z.number().min(0).nullable().optional().describe("Unit price (set_item_pricing only; null clears prices)"),
       price_details: z.string().optional().describe("Price note, e.g. \"per lb\" (set_item_pricing only)"),
       package_size: z.string().nullable().optional().describe("Package size, e.g. \"500 g\" or \"12 oz\" (set_item_pricing only; null clears)"),
-      photo_query: z.string().optional().describe("Search text to auto-pick a photo (set_item_photo) or to search (search_item_photos); defaults to the item name"),
+      photo_query: z.string().optional().describe("Search text to auto-pick a photo (set_item_photo) or to search (search_item_photos); defaults to the item name. Use ENGLISH (brand + product + size); common Spanish grocery words are translated as a fallback"),
       limit: z.number().int().min(1).max(10).optional().describe("Max results per source (search_item_photos only, default 3)"),
       photo_url: z.string().nullable().optional().describe("Image to attach as the item's photo: a public https URL or an absolute local file path (set_item_photo only; null removes the photo)"),
       upc: z.string().nullable().optional().describe("Product barcode/UPC (set_item_pricing: stored on the item, null clears; search_item_photos/set_item_photo: exact product photo lookup)"),
@@ -234,14 +234,15 @@ export function register(server, getClient, { searchPhotos = defaultSearchPhotos
         case "search_item_photos": {
           const query = params.photo_query || name;
           if (!query && !params.upc) throw new Error(`Action "search_item_photos" requires "photo_query", "name" or "upc"`);
-          const { results, errors } = await searchPhotos({ query, upc: params.upc, limit: params.limit });
+          const { results, errors, usedQuery } = await searchPhotos({ query, upc: params.upc, limit: params.limit });
           if (results.length === 0) {
             return textResponse(`No photos found for "${query || params.upc}".${errors.length ? "\nErrors: " + errors.join("; ") : ""}`);
           }
           const lines = results.map((r, i) =>
             `${i + 1}. ${r.title} [${r.source}, ${r.license}, by ${r.creator}]\n   ${r.url}`);
           const tail = errors.length ? `\n(Some sources failed: ${errors.join("; ")})` : "";
-          return textResponse(`${results.length} candidate photos. Use set_item_photo with the chosen photo_url:\n${lines.join("\n")}${tail}`);
+          const asNote = usedQuery ? ` (searched as "${usedQuery}")` : "";
+          return textResponse(`${results.length} candidate photos${asNote}. Use set_item_photo with the chosen photo_url:\n${lines.join("\n")}${tail}`);
         }
         case "set_item_photo": {
           let itemName = name;

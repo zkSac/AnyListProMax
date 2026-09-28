@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { searchPhotos, searchProductByUpc, splitSize } from '../src/photo-search.js';
+import { searchPhotos, searchProductByUpc, splitSize, translateQuery } from '../src/photo-search.js';
 
 const json = (data, ok = true, status = 200) => Promise.resolve({ ok, status, json: async () => data });
 
@@ -128,5 +128,26 @@ describe('size-aware search', () => {
     assert.equal(n, 2);
     assert.deepEqual(errors, []);
     assert.equal(results.length, 1);
+  });
+});
+
+describe('Spanish queries', () => {
+  it('translates known grocery words and keeps brands, sizes and unknown words', () => {
+    assert.equal(translateQuery('arroz kroger'), 'rice kroger');
+    assert.equal(translateQuery('Queso mozzarella Kroger 32 oz'), 'cheese mozzarella Kroger 32 oz');
+    assert.equal(translateQuery('Plátanos'), 'bananas');
+    assert.equal(translateQuery('leche de almendra'), 'milk almendra');
+    assert.equal(translateQuery('papel higiénico'), 'paper toilet');
+    assert.equal(translateQuery('kroger rice'), 'kroger rice');
+    assert.equal(translateQuery(''), '');
+  });
+
+  it('searches with the translated text and reports it', async () => {
+    const f = fakeFetch({ 'openverse': () => json({ results: [] }), 'cgi/search.pl': () => json(OFF_SEARCH) });
+    const { usedQuery } = await searchPhotos({ query: 'arroz kroger', fetchImpl: f });
+    assert.equal(usedQuery, 'rice kroger');
+    assert.ok(f.calls.every(u => u.includes('rice')));
+    const same = await searchPhotos({ query: 'kroger rice', fetchImpl: f });
+    assert.equal(same.usedQuery, undefined);
   });
 });
