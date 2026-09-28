@@ -76,7 +76,7 @@ export function register(server, getClient) {
     description: buildDescription([]),
     inputSchema: {
       action: z.enum(["list_lists", "list_items", "add_item", "add_items",
-        "set_item_store", "check_item", "uncheck_item", "delete_item", "get_favorites", "get_recents", "list_stores"]).describe("The shopping action to perform"),
+        "set_item_store", "set_item_pricing", "set_item_photo", "check_item", "uncheck_item", "delete_item", "get_favorites", "get_recents", "list_stores"]).describe("The shopping action to perform"),
       list_name: z.string().optional().describe("Name of the list (defaults to configured default list)"),
       name: z.string().optional().describe("Item name (required for add_item, set_item_store, check_item, uncheck_item, delete_item)"),
       items: z.array(z.union([
@@ -94,7 +94,12 @@ export function register(server, getClient) {
       include_checked: z.boolean().optional().describe("Include checked-off items (list_items only, default false)"),
       include_notes: z.boolean().optional().describe("Include notes for each item (list_items only, default false)"),
       category: z.enum(valid_categories).optional().describe("Category for the item (add_item only, defaults to 'other')"),
-      store_name: z.string().optional().describe("Store to assign to this item (add_item and set_item_store only; omit or leave blank to clear)"),
+      store_name: z.string().optional().describe("Store to assign to this item (add_item and set_item_store only; omit or leave blank to clear). For set_item_pricing, the store the price applies to (defaults to the item's store)"),
+      price: z.number().min(0).nullable().optional().describe("Unit price (set_item_pricing only; null clears prices)"),
+      price_details: z.string().optional().describe("Price note, e.g. \"per lb\" (set_item_pricing only)"),
+      package_size: z.string().nullable().optional().describe("Package size, e.g. \"500 g\" or \"12 oz\" (set_item_pricing only; null clears)"),
+      photo_url: z.string().nullable().optional().describe("Image to attach as the item's photo: a public https URL or an absolute local file path (set_item_photo only; null removes the photo)"),
+      upc: z.string().nullable().optional().describe("Product barcode/UPC (set_item_pricing only; null clears)"),
     }
   }, async (params) => {
     const { action, list_name, name, quantity, notes, include_checked, include_notes, category } = params;
@@ -152,7 +157,9 @@ export function register(server, getClient) {
               const status = item.checked ? " ✓" : "";
               const note = item.note ? ` [${item.note}]` : "";
               const store = item.store ? ` @${item.store}` : "";
-              return `  - ${item.name}${qty}${status}${note}${store}`;
+              const price = item.price != null ? ` $${item.price}${item.price_details ? ` ${item.price_details}` : ""}` : "";
+              const pkg = item.package_size ? ` {${item.package_size}}` : "";
+              return `  - ${item.name}${qty}${status}${note}${store}${price}${pkg}`;
             }).join("\n");
             return `**${category}**\n${categoryItems}`;
           }).join("\n\n");
@@ -194,6 +201,36 @@ export function register(server, getClient) {
           added.forEach(n => summary.push(`  ✓ ${n}`));
           failed.forEach(f => summary.push(`  ✗ ${f}`));
           return failed.length > 0 ? errorResponse(summary.join("\n")) : textResponse(summary.join("\n"));
+        }
+        case "set_item_pricing": {
+          let itemName = name;
+          if (!itemName) itemName = await elicitRequiredField("name", "Which item do you want to price?");
+          if (params.price === undefined && params.package_size === undefined && params.upc === undefined) {
+            throw new Error(`Action "set_item_pricing" requires at least one of price, package_size or upc`);
+          }
+          await client.connect(list_name);
+          const { valid, message } = await validateStoreName(client, params.store_name);
+          if (!valid) return errorResponse(message);
+          const resolvedPrice = await resolveItemName(client, itemName);
+          await client.setItemPricing(resolvedPrice, {
+            price: params.price,
+            storeName: params.store_name,
+            priceDetails: params.price_details,
+            packageSize: params.package_size,
+            upc: params.upc,
+          });
+          return textResponse(`Updated pricing for "${resolvedPrice}" on list "${client.targetList.name}"`);
+        }
+        case "set_item_photo": {
+          let itemName = name;
+          if (!itemName) itemName = await elicitRequiredField("name", "Which item do you want to add a photo to?");
+          if (params.photo_url === undefined) throw new Error(`Action "set_item_photo" requires "photo_url" (use null to remove)`);
+          await client.connect(list_name);
+          const resolvedPhoto = await resolveItemName(client, itemName);
+          await client.setItemPhoto(resolvedPhoto, params.photo_url);
+          return textResponse(params.photo_url
+            ? `Set photo for "${resolvedPhoto}" on list "${client.targetList.name}"`
+            : `Removed photo from "${resolvedPhoto}" on list "${client.targetList.name}"`);
         }
         case "check_item": {
           let itemName = name;

@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import AnyList from '../anylist-js/lib/index.js';
 import { normalizeRecipe } from './recipe-normalizer.js';
 
@@ -282,7 +283,15 @@ class AnyListClient {
         }
         const store = (this.targetList.stores || []).find(s => s.identifier === item.storeIds[0]);
         result.store = store ? store.name : null;
-        
+        const info = item.toJSON();
+        if (info.prices.length > 0) {
+          result.price = info.prices[0].amount;
+          result.price_details = info.prices[0].details || null;
+        }
+        if (info.packageSize) result.package_size = info.packageSize;
+        if (info.upc) result.upc = info.upc;
+        if (info.photoIds.length > 0) result.photo_count = info.photoIds.length;
+
         return result;
       });
     } catch (error) {
@@ -341,6 +350,43 @@ class AnyListClient {
       storeIds = [store.identifier];
     }
     await item.setStores(storeIds);
+  }
+
+  async setItemPricing(itemName, { price, storeName, priceDetails, packageSize, upc } = {}) {
+    if (!this.targetList) {
+      throw new Error('Not connected to any list. Call connect() first.');
+    }
+    const item = this.targetList.getItemByName(itemName);
+    if (!item) {
+      throw new Error(`Item "${itemName}" not found in list`);
+    }
+    let storeId;
+    if (storeName) {
+      const store = this.targetList.findStoreByName(storeName);
+      if (!store) {
+        const available = (this.targetList.stores || []).map(s => s.name).join(', ') || 'none';
+        throw new Error(`Store "${storeName}" not found. Available stores: ${available}`);
+      }
+      storeId = store.identifier;
+    } else if (item.storeIds && item.storeIds.length > 0) {
+      storeId = item.storeIds[0];
+    }
+    await item.setPricing({ price, storeId, priceDetails, packageSize, upc });
+  }
+
+  async setItemPhoto(itemName, photoUrlOrPath) {
+    if (!this.targetList) {
+      throw new Error('Not connected to any list. Call connect() first.');
+    }
+    const item = this.targetList.getItemByName(itemName);
+    if (!item) {
+      throw new Error(`Item "${itemName}" not found in list`);
+    }
+    let photo = photoUrlOrPath || null;
+    if (photo && !/^https?:\/\//i.test(photo)) {
+      photo = await readFile(photo.replace(/^file:\/\//, ''));
+    }
+    return item.setPhoto(photo);
   }
 
   async createStore(storeName) {
