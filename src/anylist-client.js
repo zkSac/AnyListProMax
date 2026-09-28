@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import AnyList from '../anylist-js/lib/index.js';
 import { normalizeRecipe } from './recipe-normalizer.js';
 
@@ -22,6 +23,21 @@ async function downloadImage(url, fetchImpl = fetch) {
   return buf;
 }
 
+// macOS only: read credentials from a Keychain service holding two generic
+// passwords, accounts "email" and "password". Opt-in via ANYLIST_KEYCHAIN_SERVICE.
+export function readKeychainCredentials(service, exec = execFileSync, platform = process.platform) {
+  if (!service || platform !== 'darwin') return {};
+  const read = account => {
+    try {
+      return exec('/usr/bin/security', ['find-generic-password', '-s', service, '-a', account, '-w'],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  return { username: read('email'), password: read('password') };
+}
+
 export { downloadImage };
 
 class AnyListClient {
@@ -40,12 +56,17 @@ class AnyListClient {
   }
 
   async connect(listName = null) {
-    const username = this._username || process.env.ANYLIST_USERNAME;
-    const password = this._password || process.env.ANYLIST_PASSWORD;
+    let username = this._username || process.env.ANYLIST_USERNAME;
+    let password = this._password || process.env.ANYLIST_PASSWORD;
+    if ((!username || !password) && process.env.ANYLIST_KEYCHAIN_SERVICE) {
+      const kc = readKeychainCredentials(process.env.ANYLIST_KEYCHAIN_SERVICE);
+      username = username || kc.username;
+      password = password || kc.password;
+    }
     const targetListName = listName || this.defaultListName || process.env.ANYLIST_LIST_NAME;
 
     if (!username || !password) {
-      const error = new Error('Missing AnyList credentials. Provide username and password.');
+      const error = new Error('Missing AnyList credentials. Set ANYLIST_USERNAME and ANYLIST_PASSWORD (or ANYLIST_KEYCHAIN_SERVICE on macOS).');
       console.error(error.message);
       throw error;
     }

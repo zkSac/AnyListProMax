@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import AnyListClient, { downloadImage } from '../src/anylist-client.js';
+import AnyListClient, { downloadImage, readKeychainCredentials } from '../src/anylist-client.js';
 
 const require = createRequire(import.meta.url);
 const ProtoBuf = require('protobufjs');
@@ -165,5 +165,21 @@ describe('AnyListClient photo URL handling', () => {
     await assert.rejects(() => downloadImage('u', async () => res(new ArrayBuffer(0), { ok: false, status: 404 })), /HTTP 404/);
     await assert.rejects(() => downloadImage('u', async () => { throw new Error('ENOTFOUND'); }), /ENOTFOUND/);
     await assert.rejects(() => downloadImage('u', async () => res(new ArrayBuffer(0), { headers: { 'content-length': String(11 * 1024 * 1024) } })), /10 MB/);
+  });
+});
+
+describe('Keychain credentials', () => {
+  it('reads email and password from the given service', () => {
+    const calls = [];
+    const exec = (cmd, args) => { calls.push(args.join(' ')); return args.includes('email') ? 'me@x.com\n' : 'pw\n'; };
+    assert.deepEqual(readKeychainCredentials('svc', exec, 'darwin'), { username: 'me@x.com', password: 'pw' });
+    assert.ok(calls[0].includes('-s svc') && calls[0].includes('-a email'));
+  });
+
+  it('returns nothing off macOS, without a service, or when an entry is missing', () => {
+    const exec = () => { throw new Error('not found'); };
+    assert.deepEqual(readKeychainCredentials('svc', exec, 'linux'), {});
+    assert.deepEqual(readKeychainCredentials('', exec, 'darwin'), {});
+    assert.deepEqual(readKeychainCredentials('svc', exec, 'darwin'), { username: undefined, password: undefined });
   });
 });
