@@ -1,14 +1,34 @@
 const UA = "AnyListProMax/1.0 (+https://github.com/zkSac/AnyListProMax)";
 const TIMEOUT_MS = 10000;
 
-async function getJson(url, fetchImpl) {
+async function getJson(url, fetchImpl, retries = 1) {
   const res = await fetchImpl(url, {
     headers: { "User-Agent": UA, Accept: "application/json" },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
+  if (res.status >= 500 && retries > 0) {
+    await new Promise(r => setTimeout(r, 500));
+    return getJson(url, fetchImpl, retries - 1);
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
+
+const SIZE_RE = /(\d+(?:[.,]\d+)?)\s*(fl\.?\s*oz|oz|lbs?|kg|g|ml|l|ct)\b\.?/i;
+const normSize = (n, u) => `${n.replace(",", ".")}${u.toLowerCase().replace(/[\s.]/g, "").replace("lbs", "lb")}`;
+
+// "kroger mozzarella 32 oz" -> terms "kroger mozzarella", size "32oz".
+// Open Food Facts requires every word to match, so the size is used for ranking only.
+export function splitSize(query) {
+  const m = SIZE_RE.exec(query);
+  if (!m) return { terms: query.trim(), size: null };
+  return { terms: query.replace(m[0], " ").replace(/\s+/g, " ").trim(), size: normSize(m[1], m[2]) };
+}
+
+const titleSize = title => {
+  const m = SIZE_RE.exec(title || "");
+  return m ? normSize(m[1], m[2]) : null;
+};
 
 function offCandidate(p) {
   const url = p.image_front_url || p.image_url;
@@ -71,9 +91,10 @@ export async function searchPhotos({ query, upc, limit = 3, fetchImpl = fetch } 
   const n = Math.min(Math.max(Number(limit) || 3, 1), 10);
   const jobs = [];
   if (upc) jobs.push(["openfoodfacts (upc)", searchProductByUpc(upc, fetchImpl)]);
-  if (query) {
-    jobs.push(["openverse", searchStock(query, n, fetchImpl)]);
-    jobs.push(["openfoodfacts", searchProducts(query, n, fetchImpl)]);
+  const { terms, size } = splitSize(query || "");
+  if (terms) {
+    jobs.push(["openverse", searchStock(terms, n, fetchImpl)]);
+    jobs.push(["openfoodfacts", searchProducts(terms, size ? n * 3 : n, fetchImpl)]);
   }
   const settled = await Promise.allSettled(jobs.map(j => j[1]));
   const results = [];
@@ -88,5 +109,9 @@ export async function searchPhotos({ query, upc, limit = 3, fetchImpl = fetch } 
       if (!seen.has(c.url)) { seen.add(c.url); results.push(c); }
     }
   });
+  if (size) {
+    // stable sort: candidates whose title mentions the requested size go first
+    results.sort((a, b) => (titleSize(b.title) === size) - (titleSize(a.title) === size));
+  }
   return { results, errors };
 }

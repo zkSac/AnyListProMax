@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { searchPhotos, searchProductByUpc } from '../src/photo-search.js';
+import { searchPhotos, searchProductByUpc, splitSize } from '../src/photo-search.js';
 
 const json = (data, ok = true, status = 200) => Promise.resolve({ ok, status, json: async () => data });
 
@@ -91,5 +91,42 @@ describe('searchPhotos', () => {
     const f = fakeFetch({ 'api/v2/product': () => json({ status: 0 }) });
     assert.deepEqual(await searchProductByUpc('123', f), []);
     assert.deepEqual(await searchProductByUpc('abc', f), []);
+  });
+});
+
+describe('size-aware search', () => {
+  it('splitSize separates the size from the search terms', () => {
+    assert.deepEqual(splitSize('kroger mozzarella cheese 32 oz'), { terms: 'kroger mozzarella cheese', size: '32oz' });
+    assert.deepEqual(splitSize('Milk 1.5 L whole'), { terms: 'Milk whole', size: '1.5l' });
+    assert.deepEqual(splitSize('coke 12 fl oz'), { terms: 'coke', size: '12floz' });
+    assert.deepEqual(splitSize('rice 2 lbs'), { terms: 'rice', size: '2lb' });
+    assert.deepEqual(splitSize('tomatoes'), { terms: 'tomatoes', size: null });
+    assert.deepEqual(splitSize('Vitamin B12 tablets'), { terms: 'Vitamin B12 tablets', size: null });
+  });
+
+  it('searches without the size and ranks matching sizes first', async () => {
+    const f = fakeFetch({
+      'openverse': () => json({ results: [] }),
+      'cgi/search.pl': () => json({ products: [
+        { code: '1', brands: 'Kroger', product_name: 'Mozzarella slices', quantity: '21 g', image_front_url: 'https://o/1.jpg' },
+        { code: '2', brands: 'Kroger', product_name: 'Mozzarella bar', quantity: '32 oz', image_front_url: 'https://o/2.jpg' },
+        { code: '3', brands: 'Kroger', product_name: 'Mozzarella bar', quantity: '8 oz', image_front_url: 'https://o/3.jpg' },
+      ] }),
+    });
+    const { results } = await searchPhotos({ query: 'kroger mozzarella 32 oz', limit: 2, fetchImpl: f });
+    assert.equal(results[0].url, 'https://o/2.jpg');
+    assert.ok(!decodeURIComponent(f.calls.join(' ')).includes('32 oz'));
+  });
+
+  it('retries once on a 5xx and then succeeds', async () => {
+    let n = 0;
+    const f = fakeFetch({
+      'openverse': () => json({ results: [] }),
+      'cgi/search.pl': () => (++n === 1 ? json({}, false, 503) : json(OFF_SEARCH)),
+    });
+    const { results, errors } = await searchPhotos({ query: 'ketchup', fetchImpl: f });
+    assert.equal(n, 2);
+    assert.deepEqual(errors, []);
+    assert.equal(results.length, 1);
   });
 });
