@@ -21,7 +21,10 @@ function buildDescription(stores) {
 - delete_item: Permanently remove an item from a list
 - get_favorites: Get favorite items for a list
 - get_recents: Get recently added items for a list
-- list_stores: list stores available for the list (if any)`;
+- list_stores: list stores available for the list (if any)
+- set_item_store: Assign an item to a store (store_name)
+- set_item_pricing: Set an item's price (price, optional price_details like "per lb", store_name), package size (package_size, e.g. "500 g") and/or UPC barcode (upc); price=null clears the price
+- set_item_photo: Attach a photo to an item (photo_url: public https URL, or absolute local file path in stdio mode); photo_url=null removes it`;
   if (!stores || stores.length === 0) return base;
   const storeList = stores.map(s => s.name).join(', ');
   return `${base}\n\nAvailable stores: ${storeList}`;
@@ -207,6 +210,9 @@ export function register(server, getClient) {
           if (!itemName) itemName = await elicitRequiredField("name", "Which item do you want to price?");
           if (params.price === undefined && params.package_size === undefined && params.upc === undefined) {
             throw new Error(`Action "set_item_pricing" requires at least one of price, package_size or upc`);
+          }
+          if (params.price_details !== undefined && (params.price === undefined || params.price === null)) {
+            throw new Error(`"price_details" requires "price"`);
           }
           await client.connect(list_name);
           const { valid, message } = await validateStoreName(client, params.store_name);

@@ -115,6 +115,19 @@ export class MockAnyListClient {
     item.store = store || null;
   }
 
+  async setItemPricing(name, opts) {
+    const item = this._items.find(i => i.name === name);
+    if (!item) throw new Error(`Item "${name}" not found in list`);
+    item.pricing = { ...(item.pricing || {}), ...opts };
+  }
+
+  async setItemPhoto(name, photo) {
+    const item = this._items.find(i => i.name === name);
+    if (!item) throw new Error(`Item "${name}" not found in list`);
+    item.photo = photo;
+    return photo ? 'photo-id' : null;
+  }
+
   async getFavoriteItems() { return this._favorites; }
   async getRecentItems() { return this._recents; }
 

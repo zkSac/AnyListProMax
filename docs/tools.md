@@ -64,6 +64,13 @@ Manage shopping lists and items.
 // Set store for an item
 { "name": "shopping", "arguments": { "action": "set_item_store", "name": "Milk", "store_name": "Costco" } }
 
+// Set price, package size and UPC (price=null clears the price)
+{ "name": "shopping", "arguments": { "action": "set_item_pricing", "name": "Tomatoes", "price": 2.49, "price_details": "per lb", "package_size": "1 lb", "upc": "0123456789012" } }
+
+// Attach a photo: public https URL (AnyList downloads it), or an absolute local
+// path in stdio mode (jpg/png/gif/webp/bmp/tiff, max 10 MB). photo_url=null removes it.
+{ "name": "shopping", "arguments": { "action": "set_item_photo", "name": "Tomatoes", "photo_url": "https://example.com/tomato.jpg" } }
+
 // Set category for an item
 ```
 

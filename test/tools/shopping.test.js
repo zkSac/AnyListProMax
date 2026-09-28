@@ -286,4 +286,79 @@ describe('shopping tool', () => {
       assert.ok(result.content[0].text.includes('Avocado'));
     });
   });
+
+  describe('set_item_pricing', () => {
+    beforeEach(async () => {
+      await handlers.shopping({ action: 'add_item', name: 'Tomatoes' });
+    });
+
+    it('sets price, package size and upc', async () => {
+      const result = await handlers.shopping({
+        action: 'set_item_pricing', name: 'Tomatoes',
+        price: 2.49, price_details: 'per lb', package_size: '1 lb', upc: '0123',
+      });
+      assert.ok(result.content[0].text.includes('Updated pricing for "Tomatoes"'));
+      assert.deepEqual(client._items[0].pricing, {
+        price: 2.49, storeName: undefined, priceDetails: 'per lb', packageSize: '1 lb', upc: '0123',
+      });
+    });
+
+    it('accepts null to clear the price', async () => {
+      await handlers.shopping({ action: 'set_item_pricing', name: 'Tomatoes', price: null });
+      assert.equal(client._items[0].pricing.price, null);
+    });
+
+    it('allows a price of 0', async () => {
+      await handlers.shopping({ action: 'set_item_pricing', name: 'Tomatoes', price: 0 });
+      assert.equal(client._items[0].pricing.price, 0);
+    });
+
+    it('resolves a partial item name', async () => {
+      await handlers.shopping({ action: 'set_item_pricing', name: 'tomat', price: 1 });
+      assert.equal(client._items[0].pricing.price, 1);
+    });
+
+    it('errors when nothing to set', async () => {
+      const result = await handlers.shopping({ action: 'set_item_pricing', name: 'Tomatoes' });
+      assert.equal(result.isError, true);
+      assert.ok(result.content[0].text.includes('requires at least one of'));
+    });
+
+    it('errors when price_details is given without price', async () => {
+      const result = await handlers.shopping({
+        action: 'set_item_pricing', name: 'Tomatoes', package_size: '1 lb', price_details: 'per lb',
+      });
+      assert.equal(result.isError, true);
+      assert.ok(result.content[0].text.includes('requires "price"'));
+    });
+
+    it('errors on unknown item', async () => {
+      const result = await handlers.shopping({ action: 'set_item_pricing', name: 'Nope', price: 1 });
+      assert.equal(result.isError, true);
+    });
+  });
+
+  describe('set_item_photo', () => {
+    beforeEach(async () => {
+      await handlers.shopping({ action: 'add_item', name: 'Tomatoes' });
+    });
+
+    it('sets a photo from a URL', async () => {
+      const result = await handlers.shopping({
+        action: 'set_item_photo', name: 'Tomatoes', photo_url: 'https://example.com/t.jpg',
+      });
+      assert.ok(result.content[0].text.includes('Set photo for "Tomatoes"'));
+      assert.equal(client._items[0].photo, 'https://example.com/t.jpg');
+    });
+
+    it('removes the photo with null', async () => {
+      const result = await handlers.shopping({ action: 'set_item_photo', name: 'Tomatoes', photo_url: null });
+      assert.ok(result.content[0].text.includes('Removed photo'));
+    });
+
+    it('errors when photo_url is missing', async () => {
+      const result = await handlers.shopping({ action: 'set_item_photo', name: 'Tomatoes' });
+      assert.equal(result.isError, true);
+    });
+  });
 });

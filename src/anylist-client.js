@@ -8,7 +8,8 @@ class AnyListClient {
    *   Optional credentials. Falls back to ANYLIST_USERNAME / ANYLIST_PASSWORD / ANYLIST_LIST_NAME
    *   environment variables when not provided (stdio mode).
    */
-  constructor({ username, password, defaultListName } = {}) {
+  constructor({ username, password, defaultListName, allowLocalFiles = true } = {}) {
+    this.allowLocalFiles = allowLocalFiles;
     this.client = null;
     this.targetList = null;
     this._username = username || null;
@@ -383,7 +384,13 @@ class AnyListClient {
       throw new Error(`Item "${itemName}" not found in list`);
     }
     let photo = photoUrlOrPath || null;
+    if (photo && /^[a-z][a-z0-9+.-]*:\/\//i.test(photo) && !/^(https?|file):\/\//i.test(photo)) {
+      throw new Error('Photo must be an http(s) URL or a local file path.');
+    }
     if (photo && !/^https?:\/\//i.test(photo)) {
+      if (!this.allowLocalFiles) {
+        throw new Error('Local file paths are not allowed here; provide a public http(s) image URL.');
+      }
       photo = await readFile(photo.replace(/^file:\/\//, ''));
     }
     return item.setPhoto(photo);

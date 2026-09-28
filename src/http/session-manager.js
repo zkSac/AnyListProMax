@@ -28,6 +28,7 @@ export async function getOrCreateSession(userId) {
   }
 
   const client = new AnyListClient({
+    allowLocalFiles: false,
     username: creds.username,
     password: creds.password,
     defaultListName: creds.defaultListName,
